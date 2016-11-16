@@ -1,0 +1,25 @@
+{
+    "name": "mssql2psql",
+    "version": "1",
+    "description": "MS SQL Server to PostgreSQL",
+    "author": "Ben Ritz <ben.c.ritz@gmail.com>",
+    "scripts": {
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/benritz/mssql2psql"
+    },
+    "keywords": [
+                 "mssql",
+                 "postgresql"
+                 ],
+    "dependencies": {
+        "mssql": "*"
+    },
+    "devDependencies": {
+    },
+    "preferGlobal": false,
+    "private": false,
+    "analyze": true,
+    "license": "MIT"
+}
