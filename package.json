@@ -1,9 +1,10 @@
 {
     "name": "mssql2psql",
-    "version": "1",
+    "version": "1.0.0",
     "description": "MS SQL Server to PostgreSQL",
     "author": "Ben Ritz <ben.c.ritz@gmail.com>",
     "scripts": {
+    	"start": "node mssql2psql.js" 
     },
     "repository": {
         "type": "git",
