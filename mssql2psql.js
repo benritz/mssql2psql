@@ -1,4 +1,4 @@
-"use strict"
+"use strict";
 
 function writeTable(table, columns) {
 	var f = function(resolve, reject) {
@@ -119,9 +119,11 @@ function writeTables() {
     return sql.query`select t.name as table_name, c.column_id, c.name as column_name, c.max_length, c.precision, c.scale, c.is_nullable, c.is_identity, ty.name as type from sys.tables t, sys.columns c, sys.types ty where t.object_id = c.object_id and c.user_type_id = ty.user_type_id order by t.name asc, t.object_id asc, c.column_id asc`.then(function(rows) {
 		out.write("/* --------------------- TABLES --------------------- */\n\n");
 
-		// enable case insensitive extension
-		out.write("-- enable case insensitive extension\n");
-		out.write("create extension citext;\n\n");
+		if (options.forceCaseInsensitive) {
+			// enable case insensitive extension
+			out.write("-- enable case insensitive extension\n");
+			out.write("create extension citext;\n\n");
+		}
 
 		// write table DDL and data
 		var a = [];
@@ -343,11 +345,29 @@ order by t.name asc, t.object_id asc, c.column_id asc`.then(function(rows) {
 	});
 }
 
+/**
+ * Write view defs.
+ */
+function writeViews() {
+	out.write("/* --------------------- VIEWS --------------------- */\n\n");
+
+	return sql.query`select c.text from sysobjects o, syscomments c where c.id = o.id and o.name = 'net_search_history' and o.type = 'V' order by o.name asc`.then(function(rows) {
+		if (rows.length) {
+			for (let row of rows) {
+				out.write(row.text.trim());
+				out.write(";\n");
+			}
+
+			out.write("\n");
+		}
+	});
+}
+
 var minimist = require('minimist');
 
 var options = minimist(process.argv.slice(2), { 
 	boolean: ["forceCaseInsensitive"], 
-	default: { "dataBatchSize": 100 } });
+	default: { "dataBatchSize": 100, "forceCaseInsensitive": true } });
 var args = options._;
 delete options._;
 
@@ -363,7 +383,7 @@ var out;
 if (args.length === 1) {
 	out = process.stdout;
 } else {
-	var fs = require('fs');
+	let fs = require('fs');
 	out = fs.createWriteStream(args[1]);
 }
 
@@ -375,16 +395,17 @@ sql.connect(url)
 	.then(writeIndexes)
 	.then(writeForeignKeyes)
 	.then(writeDefaults)
+	.then(writeViews)
 	.then(function() {
 		if (out !== process.stdout) {
-			out.end();
+			out.end(function(err) {
+				process.exit(0);
+			});
+		}  else {
+			process.exit(0);
 		}
-		process.exit(0);
 	})
 	.catch(function(e) {
      console.error(e);
      process.exit(1);
 });
-
-
-// create view

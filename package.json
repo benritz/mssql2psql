@@ -12,10 +12,11 @@
     },
     "keywords": [
                  "mssql",
-                 "postgresql"
+                 "postgres"
                  ],
     "dependencies": {
-        "mssql": "*"
+        "mssql": "*",
+        "minimist": "*"
     },
     "devDependencies": {
     },
