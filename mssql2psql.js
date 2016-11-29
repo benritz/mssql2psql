@@ -159,7 +159,7 @@ function writeSeqReset() {
 	// create function to get the maximum value for a sequence's field
 	// see http://stackoverflow.com/a/5943183/1095458
 	out.write("-- function to find a sequence's field's maximum value, this is used to set the sequence's next value after the data is inserted\n");
-	out.write("-- see http://stackoverflow.com/a/5943183/1095458");
+	out.write("-- see http://stackoverflow.com/a/5943183/1095458\n”);
 	out.write(`create or replace function seq_field_max_value(oid) returns bigint
 	volatile strict language plpgsql as  $$
 	declare
