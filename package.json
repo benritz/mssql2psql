@@ -1,27 +1,27 @@
 {
-    "name": "mssql2psql",
-    "version": "1.0.0",
-    "description": "MS SQL Server to PostgreSQL",
-    "author": "Ben Ritz <ben.c.ritz@gmail.com>",
-    "scripts": {
-    	"start": "node mssql2psql.js" 
-    },
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/benritz/mssql2psql"
-    },
-    "keywords": [
-                 "mssql",
-                 "postgres"
-                 ],
-    "dependencies": {
-        "mssql": "*",
-        "minimist": "*"
-    },
-    "devDependencies": {
-    },
-    "preferGlobal": false,
-    "private": false,
-    "analyze": true,
-    "license": "MIT"
+  "name": "mssql2psql",
+  "version": "1.0.0",
+  "description": "MS SQL Server to PostgreSQL",
+  "author": "Ben Ritz <ben.c.ritz@gmail.com>",
+  "scripts": {
+    "start": "node mssql2psql.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/benritz/mssql2psql"
+  },
+  "keywords": [
+    "mssql",
+    "postgres"
+  ],
+  "dependencies": {
+    "minimist": "*",
+    "mssql": "*",
+    "oracledb": "^1.12.2"
+  },
+  "devDependencies": {},
+  "preferGlobal": false,
+  "private": false,
+  "analyze": true,
+  "license": "MIT"
 }

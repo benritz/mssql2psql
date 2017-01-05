@@ -1,9 +1,9 @@
 "use strict";
 
 function writeTable(table, columns) {
-	var f = function(resolve, reject) {
+	let f = function(resolve, reject) {
 		// get columns def
-		var columnDefs = "";
+        let columnDefs = "";
 
 		for (let column of columns) {
 			if (columnDefs)
@@ -22,7 +22,7 @@ function writeTable(table, columns) {
 					if (column.max_length === -1) {
 						columnDefs += "text";
 					} else {
-						var maxLen = column.max_length;
+                        let maxLen = column.max_length;
 						if (column.type === "nvarchar") {
 							maxLen /= 2;
 						}
@@ -50,7 +50,7 @@ function writeTable(table, columns) {
 		// although this is done in a promise the ms sql tedious driver blocks other 
 		// recordset streams until this one is finished so the output for a table is
 		// sequential
-		var request = new sql.Request();
+        let request = new sql.Request();
 		request.stream = true;
 		
 		request.query(`select * from ${table}`);
@@ -60,13 +60,13 @@ function writeTable(table, columns) {
 			out.write(`/* -- ${table} -- */\ndrop table if exists ${table};\n\ncreate table ${table}\n(\n${columnDefs}\n);\n\n`);
 		});
 
-		var n = 0;
+        let n = 0;
 
 		request.on('row', function(row) {
-			var values = "";
+            let values = "";
 
 			Object.keys(row).forEach(function(field) {
-				var value = row[field];
+                let value = row[field];
 
 				if (values) {
 					values += ", ";
@@ -101,7 +101,7 @@ function writeTable(table, columns) {
 			reject(err);
 		});
 
-		request.on('done', function(affected) {
+		request.on('done', function(/* affected */) {
 			out.write(";\n");
 
 			if (n !== 0) {
@@ -126,10 +126,10 @@ function writeTables() {
 		}
 
 		// write table DDL and data
-		var a = [];
+        let a = [];
 
 		if (rows.length) {
-			var table, columns;
+            let table, columns;
 
 			for (let row of rows) {
 				if (row.column_id === 1) {
@@ -141,7 +141,7 @@ function writeTables() {
 					columns = [];
 				}
 
-				var column = row;
+                let column = row;
 				delete column.table_name;
 				columns.push(column);
 			}
@@ -159,7 +159,7 @@ function writeSeqReset() {
 	// create function to get the maximum value for a sequence's field
 	// see http://stackoverflow.com/a/5943183/1095458
 	out.write("-- function to find a sequence's field's maximum value, this is used to set the sequence's next value after the data is inserted\n");
-	out.write("-- see http://stackoverflow.com/a/5943183/1095458\n”);
+	out.write("-- see http://stackoverflow.com/a/5943183/1095458\n");
 	out.write(`create or replace function seq_field_max_value(oid) returns bigint
 	volatile strict language plpgsql as  $$
 	declare
@@ -210,9 +210,9 @@ rt.object_id = fk.referenced_object_id and fkc.referenced_column_id = rc.column_
 order by 
 fk.object_id asc, fkc.constraint_column_id asc`.then(function(rows) {
 		if (rows.length) {
-			var key, parentColumns, parentTable, referencedColumns, referencedTable;
+            let key, parentColumns, parentTable, referencedColumns, referencedTable;
 
-			var f = function() { out.write(`alter table ${parentTable} add constraint ${key} foreign key (${parentColumns}) references ${referencedTable} (${referencedColumns});\n`); };
+            let f = function() { out.write(`alter table ${parentTable} add constraint ${key} foreign key (${parentColumns}) references ${referencedTable} (${referencedColumns});\n`); };
 
 			for (let row of rows) {
 				if (row.constraint_column_id === 1) {
@@ -259,9 +259,9 @@ i.object_id = t.object_id and ic.object_id = t.object_id and ic.index_id = i.ind
 ic.column_id = c.column_id 
 order by t.name asc, t.object_id asc, i.index_id asc, ic.index_column_id asc`.then(function(rows) {
 		if (rows.length) {
-			var indexName, table, columns, isPrimary, isUniqueConst, isUnique;
+            let indexName, table, columns, isPrimary, isUniqueConst, isUnique;
 
-			var f = function() {
+            let f = function() {
 				if (isPrimary) {
 					out.write(`alter table ${table} add constraint ${indexName} primary key (${columns});\n`);
 				} else if (isUniqueConst) {
@@ -317,14 +317,14 @@ where
 t.object_id = c.object_id and c.user_type_id = ty.user_type_id and t.object_id = d.parent_object_id and c.column_id = d.parent_column_id
 order by t.name asc, t.object_id asc, c.column_id asc`.then(function(rows) {
 		if (rows.length) {
-			var table;
+            let table;
 			for (let row of rows) {
 				if (table && table !== row.table_name) {
 					out.write("\n");
 				}
 			
 				table = row.table_name;
-				var definition = row.definition;
+                let definition = row.definition;
 				
 				definition = definition.replace(/^\(\((\d+)\)\)$/, "$1");
 				definition = definition.replace("(getdate())", "now()");
@@ -363,12 +363,12 @@ function writeViews() {
 	});
 }
 
-var minimist = require('minimist');
+let minimist = require('minimist');
 
-var options = minimist(process.argv.slice(2), { 
+let options = minimist(process.argv.slice(2), {
 	boolean: ["forceCaseInsensitive"], 
 	default: { "dataBatchSize": 100, "forceCaseInsensitive": true } });
-var args = options._;
+let args = options._;
 delete options._;
 
 if (args.length === 0) {
@@ -376,9 +376,9 @@ if (args.length === 0) {
 	process.exit(1);
 }
 
-var url = args[0];
+let url = args[0];
 
-var out;
+let out;
 
 if (args.length === 1) {
 	out = process.stdout;
@@ -387,7 +387,7 @@ if (args.length === 1) {
 	out = fs.createWriteStream(args[1]);
 }
 
-var sql = require('mssql');
+let sql = require('mssql');
 
 sql.connect(url)
 	.then(writeTables)
