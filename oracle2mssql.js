@@ -1,70 +1,136 @@
 "use strict";
 
-function writeTableDDL(table, columns) {
+let values = require('object.values');
+
+if (!Object.values) {
+    values.shim();
+}
+
+function writeDropReferencedForeignKeyDDL(table) {
+    if (table.referencedForeignKeys.length === 0)
+        return;
+
+    return new Promise((resolve, reject) => {
+        let ddl = `/* -- ${table.name} -- */\n\n`;
+
+        for (let key of table.referencedForeignKeys) {
+            ddl += `if object_id('${key.key}', 'F') is not null\nbegin\n\talter table "${key.parentTable}" drop constraint "${key.key}"\nend\nGO\n\n`;
+        }
+
+        // write table def
+        out.write(ddl, "utf8", (err) => {
+            if (err)
+                reject(err);
+            else
+                resolve();
+        });
+    });
+}
+
+function writeForeignKeyDDL(table) {
+    if (table.foreignKeys.length === 0 || table.referencedForeignKeys.length === 0)
+        return;
+
+    return new Promise((resolve, reject) => {
+        let ddl = `/* -- ${table.name} -- */\n\n`;
+
+        let keyDDL = (key) => {
+            let colsToStr = (columns) => { return columns.map(function(column) { return "\"" + column + "\""; }).join(", ") };
+
+            return `alter table "${key.parentTable}" add constraint "${key.key}" foreign key (${colsToStr(key.parentColumns)}) references "${key.referencedTable}" (${colsToStr(key.referencedColumns)})\nGO\n\n`;
+        };
+
+        for (let key of table.foreignKeys) {
+            ddl += keyDDL(key);
+        }
+
+        for (let key of table.referencedForeignKeys) {
+            ddl += keyDDL(key);
+        }
+
+        // write table def
+        out.write(ddl, "utf8", (err) => {
+            if (err)
+                reject(err);
+            else
+                resolve();
+        });
+    });
+}
+
+function writeTableDDL(table) {
     return new Promise((resolve, reject) => {
         // get columns defs
-        let columnDefs = "";
+        let defs = "";
 
-        for (let column of columns) {
-            if (columnDefs)
-                columnDefs += ",\n";
+        for (let column of table.columns) {
+            if (defs)
+                defs += ",\n";
 
-            columnDefs += column.column_name + " ";
+            defs += "\"" + column.column_name + "\" ";
 
             if (column.type === "number") {
                 if (column.scale === 0) {
                     switch (column.precision) {
                         case 20:
-                            columnDefs += "bigint";
+                            defs += "bigint";
                             break;
                         case 10:
                         case null:    // default number precision, assume we wanted integer
-                            columnDefs += "int";
+                            defs += "int";
                             break;
                         case 5:
-                            columnDefs += "smallint";
+                            defs += "smallint";
                             break;
                         case 1:
-                            columnDefs += "bit";
+                            defs += "bit";
                             break;
                         default:
-                            columnDefs += "decimal(" + column.precision + ")";
+                            defs += "decimal(" + column.precision + ")";
                             break;
                     }
                 } else if (column.precision === 19 && column.scale === 4) {
-                    columnDefs += "currency";
+                    defs += "currency";
                 } else {
-                    columnDefs += "decimal(" + column.precision + ", " + column.scale + ")";
+                    defs += "decimal(" + column.precision + ", " + column.scale + ")";
                 }
             } else if (column.type === "varchar" || column.type === "varchar2") {
-                columnDefs += "varchar(" + (column.max_length) + ")";
+                defs += "varchar(" + (column.max_length) + ")";
             } else if (column.type === "nvarchar" || column.type === "nvarchar2") {
-                columnDefs += "nvarchar(" + (column.max_length) + ")";
+                defs += "nvarchar(" + (column.max_length) + ")";
             } else if (column.type === "clob") {
-                columnDefs += "varchar(max)";
+                defs += "varchar(max)";
             } else if (column.type === "nclob") {
-                columnDefs += "nvarchar(max)";
+                defs += "nvarchar(max)";
             } else if (column.type === "date" || column.type === "timestamp(6)") {
-                columnDefs += "datetime";
+                defs += "datetime";
             } else if (column.type === "long raw") {
-                columnDefs += "image";
+                defs += "image";
             } else {
-                columnDefs += column.type;
+                defs += column.type;
             }
 
             if (!column.is_nullable) {
-                columnDefs += " not";
+                defs += " not";
             }
 
-            columnDefs += " null";
+            defs += " null";
 
             if (column.is_identity) {
-                columnDefs += " identity";
+                defs += " identity";
             }
         }
 
+        if (table.primaryKey) {
+            let pkCols = table.primaryKey.columns.map(function(column) { return "\"" + column + "\""; }).join(", ");
+
+            defs += `,\n\nconstraint "${table.primaryKey.key}" primary key (${pkCols})`;
+        }
+
+        let ddl = `/* -- ${table.name} -- */\nif object_id('${table.name}', 'U') is not null\n\tdrop table "${table.name}"\nGO\n\ncreate table "${table.name}"\n(\n${defs}\n)\nGO\n\n`;
+
         // write table def
-        out.write(`/* -- ${table} -- */\nif object_id('${table}', 'U') is not null\n\tdrop table ${table}\nGO\n\ncreate table ${table}\n(\n${columnDefs}\n)\nGO\n\n`, "utf8", (err) => {
+        out.write(ddl, "utf8", (err) => {
             if (err)
                 reject(err);
             else
@@ -75,7 +141,7 @@ function writeTableDDL(table, columns) {
 
 function writeTableDisableConstraints(table) {
     return new Promise((resolve, reject) => {
-        out.write(`/* -- ${table} -- */\nif object_id('${table}', 'U') is not null\nbegin\n\talter table ${table} nocheck constraint all\n\talter table ${table} disable trigger all\nend\nGO\n\n`, "utf8", (err) => {
+        out.write(`/* -- ${table.name} -- */\nif object_id('${table.name}', 'U') is not null\nbegin\n\talter table ${table.name} nocheck constraint all\n\talter table ${table.name} disable trigger all\nend\nGO\n\n`, "utf8", (err) => {
             if (err)
                 reject(err);
             else
@@ -86,7 +152,7 @@ function writeTableDisableConstraints(table) {
 
 function writeTableEnableConstraints(table) {
     return new Promise((resolve, reject) => {
-        out.write(`/* -- ${table} -- */\nalter table ${table} with check check constraint all\nGO\nalter table ${table} enable trigger all\nGO\n\n`, "utf8", (err) => {
+        out.write(`/* -- ${table.name} -- */\nalter table ${table.name} with check check constraint all\nGO\nalter table ${table.name} enable trigger all\nGO\n\n`, "utf8", (err) => {
             if (err)
                 reject(err);
             else
@@ -95,12 +161,12 @@ function writeTableEnableConstraints(table) {
     });
 }
 
-function writeTableData(table, columns, truncate) {
+function writeTableData(table, truncate) {
     return new Promise((resolve, reject) => {
         // get select clause
         let selectClause = "", columnsClause = "", identity = false;
 
-        for (let column of columns) {
+        for (let column of table.columns) {
             if (column.type === "long raw")     // long raw columns cause oracledb to crash
                 continue;
 
@@ -126,8 +192,11 @@ function writeTableData(table, columns, truncate) {
         }
 
         let writeData = () => {
+            const minDate = new Date(1753, 0, 1);
+            const minDateTime = minDate.getTime();
+
             // create streaming result set and write out inserts
-            connection.execute(`select ${selectClause} from ${table}`, {}, { resultSet: true , outFormat: oracledb.OBJECT }).then((result) => {
+            connection.execute(`select ${selectClause} from "${table.name}"`, {}, { resultSet: true , outFormat: oracledb.OBJECT }).then((result) => {
                 let stream = result.resultSet.toQueryStream();
 
                 let n = 0, onData = 0, onEnd = false;
@@ -137,7 +206,7 @@ function writeTableData(table, columns, truncate) {
                         let data = `\nGO\n\n`;
 
                         if (identity)
-                            data += `set identity_insert ${table} off\n\n`;
+                            data += `set identity_insert ${table.name} off\n\n`;
 
                         out.write(data, "utf8", (err) => { if (err) reject(err); else resolve(); });
                     } else {
@@ -166,7 +235,7 @@ function writeTableData(table, columns, truncate) {
                                     });
                                 };
 
-                                readValue = toStr(value).then((value) => { a.push(value); }).catch(() => { reject(err) });
+                                readValue = () => { return toStr(value).then((value) => { a.push(value); }) };
                             } else {
                                 // blobs are not supported yet (need to convert them to hex string?)
                                 readValue = () => { a.push(null); };
@@ -188,8 +257,11 @@ function writeTableData(table, columns, truncate) {
                             }
 
                             if (typeof value === "string") {
-                                values += "'" + value.replace("'", "''") + "'";
+                                values += "'" + value.replace(/'/g, "''") + "'";
                             } else if (value instanceof Date) {
+                                if (value.getTime() < minDateTime)
+                                    value = minDate;
+
                                 values += "'" + value.toISOString() + "'";
                             } else {
                                 values += value;
@@ -199,16 +271,16 @@ function writeTableData(table, columns, truncate) {
                         let data = "";
 
                         if (n === 0 && identity) {
-                            data += `set identity_insert ${table} on\n\n`;
+                            data += `set identity_insert ${table.name} on\n\n`;
                         }
 
                         if (options.dataBatchSize === 1) {
-                            data += `insert into ${table} (${columnsClause}) values (${values})\nGO\n`;
+                            data += `insert into ${table.name} (${columnsClause}) values (${values})\nGO\n`;
                         } else {
                             if (n % options.dataBatchSize === 0) {
                                 if (n !== 0)
                                     data += "\nGO\n\n";
-                                data += `insert into ${table} (${columnsClause}) values (${values})`;
+                                data += `insert into ${table.name} (${columnsClause}) values (${values})`;
                             } else {
                                 data += `\n,(${values})`;
                             }
@@ -241,13 +313,13 @@ function writeTableData(table, columns, truncate) {
                     if (onData === 0)
                         end();
                 });
-            });
+            }).catch((err) => { console.error(err) });
         };
 
-        let data = `/* -- ${table} -- */\n`;
+        let data = `/* -- ${table.name} -- */\n`;
 
         if (truncate) {
-            data += `delete from ${table}\nGO\n\n`;
+            data += `delete from ${table.name}\nGO\n\n`;
         }
 
         out.write(data, "utf8", (err) => {
@@ -261,7 +333,7 @@ function writeTableData(table, columns, truncate) {
     });
 }
 
-function writeTables() {
+function getTableMetadata() {
     return connection.execute(`select 
 upper(c.TABLE_NAME) as "table_name", c.COLUMN_ID as "column_id", upper(c.COLUMN_NAME) as "column_name", c.DATA_LENGTH as "max_length", c.DATA_PRECISION as "precision", c.DATA_SCALE as "scale", case c.NULLABLE when 'Y' then 1 else 0 end as "is_nullable", case when trc.COLUMN_NAME is null then 0 else 1 end as "is_identity", lower(c.DATA_TYPE) as "type" 
 from 
@@ -271,88 +343,100 @@ order by c.TABLE_NAME asc, c.COLUMN_ID asc`, {}, { outFormat: oracledb.OBJECT, m
         let tables = {};
 
         if (result.rows.length) {
-            let table, columns;
+            let tableData;
+
+            const addTable = (tableData) => {
+                if (options.ignoreTable.indexOf(tableData.name) === -1)
+                    tables[tableData.name] = tableData;
+            };
 
             for (let row of result.rows) {
                 if (row.column_id === 1) {
-                    if (table) {
-                        tables[table] = columns;
+                    if (tableData) {
+                        addTable(tableData);
                     }
 
-                    table = row.table_name;
-                    columns = [];
+                    tableData = { name: row.table_name, columns: [], primaryKey: null, foreignKeys: [], referencedForeignKeys: [] };
                 }
 
                 let column = row;
                 delete column.table_name;
-                columns.push(column);
+                tableData.columns.push(column);
             }
 
-            tables[table] = columns;
+            addTable(tableData);
         }
 
-        let p = Promise.resolve();
-
-        if (options.createTable === true) {
-            // creating all tables
-            for (let table of Object.keys(tables)) {
-                let columns = tables[table];
-
-                p = p.then(writeTableDDL.bind(this, table, columns));
-                p = p.then(writeTableData.bind(this, table, columns, false /* don't truncate data */));
-            }
-        } else {
-            for (let table of Object.keys(tables)) {
-                p = p.then(writeTableDisableConstraints.bind(this, table));
-            }
-
-            if (Array.isArray(options.createTable)) {
-                for (let table of options.createTable) {
-                    let columns = tables[table];
-                    if (columns) {
-                        p = p.then(writeTableDDL.bind(this, table, columns));
-                    }
-                }
-            }
-
-            for (let table of Object.keys(tables)) {
-                p = p.then(writeTableData.bind(this, table, tables[table], true /* truncate data */));
-            }
-
-            for (let table of Object.keys(tables)) {
-                p = p.then(writeTableEnableConstraints.bind(this, table));
-            }
-        }
-
-        return p;
-	});
+        return tables;
+    });
 }
 
-function getForeignKeys(table, referenced = false) {
+function getPrimaryKeyMetadata(tables) {
     let sql = `select
-    p.constraint_name as "key_name", p.table_name as "parent_table", pc.column_name as "parent_column", r.table_name as "referenced_table", rc.column_name as "referenced_column", rc.position as "constraint_column_id"
-    from
-    user_constraints p  join user_cons_columns pc on p.owner = pc.owner and p.constraint_name = pc.constraint_name join user_constraints r on p.r_owner = r.owner and p.r_constraint_name = r.constraint_name join user_cons_columns rc on r.owner = rc.owner and r.constraint_name = rc.constraint_name
-    where
-    p.constraint_type = 'R' and `;
-
-    if (referenced)
-        sql += `r`;
-    else
-        sql += `p`;
-
-    sql += `.table_name = '${table}' order by p.table_name asc, pc.position asc`;
+c.constraint_name as "key_name", c.table_name as "table", cc.column_name as "column", cc.position as "constraint_column_id"
+from
+user_constraints c join user_cons_columns cc on c.owner = cc.owner and c.constraint_name = cc.constraint_name
+where
+c.constraint_type = 'P' order by c.table_name asc, cc.position asc`;
 
     return connection.execute(sql, {}, { outFormat: oracledb.OBJECT, maxRows: 100000 }).then((result) => {
-        let keys = [];
-
         if (result.rows.length) {
             let keyData;
+
+            let addKey = (keyData) => {
+                let table = tables[keyData.table];
+                if (table) {
+                    table.primaryKey = keyData;
+                }
+            };
 
             for (let row of result.rows) {
                 if (row.constraint_column_id === 1) {
                     if (keyData) {
-                        keys.push(keyData);
+                        addKey(keyData);
+                    }
+
+                    keyData = { key: row.key_name, table: row.table, columns: [] };
+                }
+
+                keyData.columns.push(row.column);
+            }
+
+            addKey(keyData);
+        }
+
+        return tables;
+    });
+}
+
+function getForeignKeyMetadata(tables) {
+    let sql = `select
+p.constraint_name as "key_name", p.table_name as "parent_table", pc.column_name as "parent_column", r.table_name as "referenced_table", rc.column_name as "referenced_column", rc.position as "constraint_column_id"
+from
+user_constraints p  join user_cons_columns pc on p.owner = pc.owner and p.constraint_name = pc.constraint_name join user_constraints r on p.r_owner = r.owner and p.r_constraint_name = r.constraint_name join user_cons_columns rc on r.owner = rc.owner and r.constraint_name = rc.constraint_name
+where
+p.constraint_type = 'R' order by p.table_name asc, pc.position asc`;
+
+    return connection.execute(sql, {}, { outFormat: oracledb.OBJECT, maxRows: 100000 }).then((result) => {
+        if (result.rows.length) {
+            let keyData;
+
+            let addKeys = (keyData) => {
+                let parent = tables[keyData.parentTable];
+                if (parent) {
+                    parent.foreignKeys.push(keyData);
+                }
+
+                let referenced = tables[keyData.referencedTable];
+                if (referenced) {
+                    referenced.referencedForeignKeys.push(keyData);
+                }
+            };
+
+            for (let row of result.rows) {
+                if (row.constraint_column_id === 1) {
+                    if (keyData) {
+                        addKeys(keyData);
                     }
 
                     keyData = { key: row.key_name, parentTable: row.parent_table, parentColumns: [], referencedTable: row.referenced_table, referencedColumns: [] };
@@ -362,19 +446,79 @@ function getForeignKeys(table, referenced = false) {
                 keyData.referencedColumns.push(row.referenced_column);
             }
 
-            keys.push(keyData);
+            addKeys(keyData);
         }
 
-        return keys;
+        return tables;
     });
 }
 
-// read options from command line
-let minimist = require('minimist');
+function getTables() {
+    return getTableMetadata()
+        .then(getPrimaryKeyMetadata)
+        .then(getForeignKeyMetadata);
+}
 
-let options = minimist(process.argv.slice(2), {
+function writeTables(tables) {
+    let p = Promise.resolve();
+
+    if (options.createTable === true) {
+        // creating all tables + inserting data
+        for (let table of Object.values(tables)) {
+            p = p.then(() => { return writeTableDDL(table) });
+        }
+
+        for (let table of Object.values(tables)) {
+            p = p.then(() => { return writeTableData(table, false /* don't truncate data */) });
+        }
+
+        for (let table of Object.values(tables)) {
+            p = p.then(() => { return writeForeignKeyDDL(table) });
+        }
+    } else {
+        // optionally creating some tables + inserting data
+        if (Array.isArray(options.createTable)) {
+            let createTables = options.createTable.map((tableName) => { return tables[tableName]; });
+
+            for (let table of createTables) {
+                p = p.then(() => { return writeDropReferencedForeignKeyDDL(table) });
+            }
+
+            for (let table of createTables) {
+                p = p.then(() => { return writeTableDDL(table) });
+            }
+        }
+
+        for (let table of Object.values(tables)) {
+            p = p.then(() => { return writeTableDisableConstraints(table) });
+        }
+
+        for (let table of Object.values(tables)) {
+            p = p.then(() => { return writeTableData(table, true /* truncate data */) });
+        }
+
+        if (Array.isArray(options.createTable)) {
+            let createTables = options.createTable.map((tableName) => { return tables[tableName]; });
+
+            for (let table of createTables) {
+                p = p.then(() => { return writeForeignKeyDDL(table) });
+            }
+        }
+
+        for (let table of Object.values(tables)) {
+            p = p.then(() => { return writeTableEnableConstraints(table) });
+        }
+    }
+
+    return p;
+}
+
+// read options from command line
+const minimist = require('minimist');
+
+const options = minimist(process.argv.slice(2), {
     boolean: ["forceCaseInsensitive"],
-    default: { "dataBatchSize": 100, "forceCaseInsensitive": true, "createTable": false } });
+    default: { "dataBatchSize": 100, "forceCaseInsensitive": true, "createTable": false, "ignoreTable": [] } });
 let args = options._;
 delete options._;
 
@@ -383,6 +527,11 @@ if (typeof options.createTable === "string")
 else if (Array.isArray(options.createTable))
     options.createTable = options.createTable.filter(function(e) { return typeof e === "string"; }).map(function(e) { return e.toUpperCase(); });
 
+if (typeof options.ignoreTable === "string")
+    options.ignoreTable = [options.ignoreTable.toUpperCase()];
+else if (Array.isArray(options.ignoreTable))
+    options.ignoreTable = options.ignoreTable.filter(function(e) { return typeof e === "string"; }).map(function(e) { return e.toUpperCase(); });
+
 if (args.length === 0) {
     console.error("Missing the connection URL.");
     process.exit(1);
@@ -390,14 +539,14 @@ if (args.length === 0) {
 
 const url = require('url');
 
-let connectUrl = url.parse(args[0]);
+const connectUrl = url.parse(args[0]);
 
 if (connectUrl.protocol !== "oracle:" || connectUrl.auth === null || connectUrl.hostname === null) {
     console.error("Invalid connection URL");
     process.exit(1);
 }
 
-let connectAuth = connectUrl.auth.split(":");
+const connectAuth = connectUrl.auth.split(":");
 
 if (connectAuth.length !== 2) {
     console.error("Invalid connection URL");
@@ -417,16 +566,17 @@ if (args.length === 1) {
 // connect and dump out statements
 let connection = null;
 
-let oracledb = require('oracledb');
+const oracledb = require('oracledb');
 
 oracledb.getConnection({ user: connectAuth[0], password: connectAuth[1], connectString: connectUrl.hostname + connectUrl.path })
-	.then((c) => {
-        connection = c;
-
-        return getForeignKeys("IBT_ITEM", true).then(function(keys) { console.log(keys); }).catch(function(err) { console.error(err); });
-		//writeTables().then(() => { c.close().then(() => { connection = null; }); });
-	})
+	.then((c) => { connection = c; })
+    .then(getTables)
+    .then(writeTables)
+    .then(() => {
+        return connection.close();
+    })
 	.then(() => {
+        connection = null;
         process.exit(0);
 	})
 	.catch((err) => {

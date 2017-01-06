@@ -17,6 +17,7 @@
   "dependencies": {
     "minimist": "*",
     "mssql": "*",
+    "object.values": "^1.0.4",
     "oracledb": "^1.12.2"
   },
   "devDependencies": {},
