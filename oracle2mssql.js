@@ -519,7 +519,7 @@ const minimist = require('minimist');
 const options = minimist(process.argv.slice(2), {
     boolean: ["forceCaseInsensitive"],
     default: { "dataBatchSize": 100, "forceCaseInsensitive": true, "createTable": false, "ignoreTable": [] } });
-let args = options._;
+const args = options._;
 delete options._;
 
 if (typeof options.createTable === "string")
@@ -560,7 +560,11 @@ if (args.length === 1) {
     out = process.stdout;
 } else {
     let fs = require('fs');
+
     out = fs.createWriteStream(args[1]);
+
+    // UTF-8 DOM for Windows
+    out.write("\ufeff");
 }
 
 // connect and dump out statements

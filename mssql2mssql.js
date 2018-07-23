@@ -1,48 +1,86 @@
 "use strict";
 
 function writeTable(table, columns) {
-	let f = function(resolve, reject) {
+	let f = (resolve, reject) => {
 		// get columns def
-        let columnDefs = "";
+        let columnDefs = "", columnsClause = "", identity = false;
 
 		for (let column of columns) {
 			if (columnDefs)
 				columnDefs += ",\n";
 
-			columnDefs += column.column_name + " ";
+            const columnName = `"${column.column_name}"`;
 
-			if (column.is_identity) {
-				columnDefs += "serial";
-			} else if (column.type === "varchar" || column.type === "nvarchar" || 
-						column.type === "text" || column.type === "ntext" ||
-						(column.type === "char" && column.max_length > 1)) {
-				if (options.forceCaseInsensitive) {
-					columnDefs += "citext";
+            columnDefs += columnName + " " + column.type;
+
+            column.unicode = column.type === "nchar" || column.type === "nvarchar" || column.type === "ntext";
+
+            if (!(column.type === "bit" ||
+                column.type === "tinyint" ||
+                column.type === "int" ||
+                column.type === "smallint" ||
+                column.type === "bigint" ||
+                column.type === "float" ||
+                column.type === "real" ||
+                column.type === "money" ||
+                column.type === "smallmoney" ||
+                column.type === "date" ||
+                column.type === "datetime" ||
+                column.type === "smalldatetime" ||
+				column.type === "text" ||
+				column.type === "ntext" ||
+				column.type === "image" ||
+                column.type === "rowversion")) {
+
+                let maxLen = column.max_length;
+
+                columnDefs += "(";
+
+                if (column.type === "char" ||
+                    column.type === "nchar" ||
+					column.type === "varchar" ||
+					column.type === "nvarchar" ||
+                    column.type === "binary" ||
+					column.type === "varbinary") {
+                    if (maxLen === -1) {
+                        columnDefs += "max";
+                    } else if (column.type === "nvarchar") {
+                        columnDefs += maxLen / 2;
+                    } else {
+                        columnDefs += maxLen;
+                    }
 				} else {
-					if (column.max_length === -1) {
-						columnDefs += "text";
-					} else {
-                        let maxLen = column.max_length;
-						if (column.type === "nvarchar") {
-							maxLen /= 2;
-						}
-						columnDefs += "varchar(" + (maxLen) + ")";
+                    if (column.type === "datetime2" ||
+                        column.type === "time") {
+                        columnDefs += column.scale;
+                    } else if (column.precision) {
+                        columnDefs += column.precision;
+                        if (column.scale) {
+                            columnDefs += "," + column.scale;
+                        }
 					}
 				}
-			} else if (column.type === "datetime") {
-				columnDefs += "timestamp";
-			} else if (column.type === "image") {
-				columnDefs += "bytea";
-			} else if (column.type === "bit") {
-				columnDefs += "boolean";
-			} else {
-				columnDefs += column.type;
-			}
-																																																																							  
+
+                columnDefs += ")";
+
+            }
+
 			if (!column.is_nullable) {
 				columnDefs += " not";
 			}
+
 			columnDefs += " null";
+
+            if (column.is_identity) {
+                columnDefs += " identity";
+                identity = true;
+            }
+
+            // columns clause
+            if (columnsClause)
+                columnsClause += ", ";
+
+            columnsClause += columnName;
 		}		
 
 		// create streaming recordset
@@ -52,20 +90,25 @@ function writeTable(table, columns) {
 		// sequential
         let request = new sql.Request();
 		request.stream = true;
-		
+
 		request.query(`select * from ${table}`);
 
-		request.on("recordset", function() {
+		request.on("recordset", () => {
 			// write table def
-			out.write(`/* -- ${table} -- */\ndrop table if exists ${table};\n\ncreate table ${table}\n(\n${columnDefs}\n);\n\n`);
-		});
+            out.write(`/* -- ${table} -- */\nif object_id('${table}', 'U') is not null\n\tdrop table "${table}"\nGO\n\ncreate table "${table}"\n(\n${columnDefs}\n)\nGO\n\n`);
+        });
 
         let n = 0;
 
-		request.on('row', function(row) {
+		request.on('row', (row) => {
+            if (n === 0 && identity)
+                out.write(`set identity_insert "${table}" on\n\n`);
+
             let values = "";
 
-			Object.keys(row).forEach(function(field) {
+			Object.keys(row).forEach((field, n) => {
+				const column = columns[n];
+
                 let value = row[field];
 
 				if (values) {
@@ -73,7 +116,13 @@ function writeTable(table, columns) {
 				}
 
 				if (typeof value === "string") {
+					if (column.unicode) {
+                        values += "N";
+					}
+
                     values += "'" + value.replace(/'/g, "''") + "'";
+				} else if (typeof value === "boolean") {
+					values += value ? "1" : "0";
 				} else if (value instanceof Date) {
 					values += "'" + value.toISOString() + "'";
 				} else {
@@ -81,14 +130,16 @@ function writeTable(table, columns) {
 				}
 			});
 
+			const insertPrefix = `insert into "${table}" (${columnsClause}) values `;
+
 			if (options.dataBatchSize === 1) {
-				out.write(`insert into ${table} values (${values});\n`);
+				out.write(`${insertPrefix}(${values})\nGO\n\n`);
 			} else {
 				if (n % options.dataBatchSize === 0) {
 					if (n !== 0) {
-						out.write(";\n\n");
+						out.write("\nGO\n\n");
 					}
-					out.write(`insert into ${table} values (${values})`);
+					out.write(`${insertPrefix}(${values})`);
 				} else {
 					out.write(`\n,(${values})`);
 				}
@@ -97,36 +148,34 @@ function writeTable(table, columns) {
 			++n;
 		});
 
-		request.on('error', function(err) {
+		request.on('error', (err) => {
 			reject(err);
 		});
 
-		request.on('done', function(/* affected */) {
-			out.write(";\n");
+		request.on('done', (/* affected */) => {
 
 			if (n !== 0) {
-				out.write("\n");
+                out.write("\n");
+
+                if (identity)
+                    out.write(`\nset identity_insert "${table}" off\n`);
+
+                out.write("GO\n\n");
 			}
 
 			resolve();
 		});
 	};
 
-	return new Promise(function(resolve, reject) { f(resolve, reject); });
+	return new Promise((resolve, reject) => { f(resolve, reject); });
 }
 
 function writeTables() {
     return sql.query`select t.name as table_name, c.column_id, c.name as column_name, c.max_length, c.precision, c.scale, c.is_nullable, c.is_identity, ty.name as type from sys.tables t, sys.columns c, sys.types ty where t.object_id = c.object_id and c.user_type_id = ty.user_type_id order by t.name asc, t.object_id asc, c.column_id asc`
 		.then((result) => {
-            const rows = result.recordset;
-
 			out.write("/* --------------------- TABLES --------------------- */\n\n");
 
-			if (options.forceCaseInsensitive) {
-				// enable case insensitive extension
-				out.write("-- enable case insensitive extension\n");
-				out.write("create extension citext;\n\n");
-			}
+            const rows = result.recordset;
 
 			// write table DDL and data
 			let tables = [];
@@ -137,7 +186,7 @@ function writeTables() {
 				for (let row of rows) {
 					if (row.column_id === 1) {
 						if (table) {
-                            tables.push({ table: table, columns: columns });
+							tables.push({ table: table, columns: columns });
 						}
 
 						table = row.table_name;
@@ -149,51 +198,15 @@ function writeTables() {
 					columns.push(column);
 				}
 
-                tables.push({ table: table, columns: columns });
+				tables.push({ table: table, columns: columns });
 			}
 
             return tables.reduce((p, tableDef) => p.then(() => writeTable(tableDef.table, tableDef.columns) ), Promise.resolve());
-		}).catch(function(e) {
+		})
+		.catch((e) => {
 			console.error(e);
+            console.trace();
 		});
-}
-
-function writeSeqReset() {
-	// create function to get the maximum value for a sequence's field
-	// see http://stackoverflow.com/a/5943183/1095458
-	out.write("-- function to find a sequence's field's maximum value, this is used to set the sequence's next value after the data is inserted\n");
-	out.write("-- see http://stackoverflow.com/a/5943183/1095458\n");
-	out.write(`create or replace function seq_field_max_value(oid) returns bigint
-	volatile strict language plpgsql as  $$
-	declare
-	 tabrelid oid;
-	 colname name;
-	 r record;
-	 newmax bigint;
-	begin
-	 for tabrelid, colname in select attrelid, attname
-				   from pg_attribute
-				  where (attrelid, attnum) in (
-						  select adrelid::regclass,adnum
-							from pg_attrdef
-						   where oid in (select objid
-										   from pg_depend
-										  where refobjid = $1
-												and classid = 'pg_attrdef'::regclass
-										)
-			  ) loop
-		  for r in execute 'select max(' || quote_ident(colname) || ') from ' || tabrelid::regclass loop
-			  if newmax is null or r.max > newmax then
-				  newmax := r.max;
-			  end if;
-		  end loop;
-	  end loop;
-	  return newmax;
-	end; $$ ;\n\n`);
-	
-	// set any sequence to the maximum value of the sequence's field
-	out.write("-- set any sequence to the maximum value of the sequence's field\n");
-	out.write("select relname, setval(oid, seq_field_max_value(oid)) from pg_class where relkind = 'S';\n\n");
 }
 
 /**
@@ -212,13 +225,13 @@ t.object_id = fk.parent_object_id and fkc.parent_column_id = c.column_id and c.o
 rt.object_id = fk.referenced_object_id and fkc.referenced_column_id = rc.column_id and rc.object_id = rt.object_id
 order by 
 fk.object_id asc, fkc.constraint_column_id asc`
-		.then(function(result) {
-            const rows = result.recordset;
+		.then((result) => {
+			const rows = result.recordset;
 
 			if (rows.length) {
 				let key, parentColumns, parentTable, referencedColumns, referencedTable;
 
-				let f = function() { out.write(`alter table ${parentTable} add constraint ${key} foreign key (${parentColumns}) references ${referencedTable} (${referencedColumns});\n`); };
+				let f = () => { out.write(`alter table "${parentTable}" add constraint ${key} foreign key (${parentColumns}) references "${referencedTable}" (${referencedColumns});\n`); };
 
 				for (let row of rows) {
 					if (row.constraint_column_id === 1) {
@@ -239,13 +252,13 @@ fk.object_id asc, fkc.constraint_column_id asc`
 						referencedColumns += ", ";
 					}
 
-					parentColumns += row.parent_column;
-					referencedColumns += row.referenced_column;
+					parentColumns += `"${row.parent_column}"`;
+					referencedColumns += `"${row.referenced_column}"`;
 				}
 
 				f();
 
-				out.write("\n");
+                out.write("GO\n\n");
 			}
 		});
 }
@@ -264,21 +277,21 @@ where
 i.object_id = t.object_id and ic.object_id = t.object_id and ic.index_id = i.index_id and t.object_id = c.object_id and 
 ic.column_id = c.column_id 
 order by t.name asc, t.object_id asc, i.index_id asc, ic.index_column_id asc`
-		.then(function(result) {
-            const rows = result.recordset;
+		.then((result) => {
+			const rows = result.recordset;
 
 			if (rows.length) {
 				let indexName, table, columns, isPrimary, isUniqueConst, isUnique;
 
-				let f = function() {
+				let f = () => {
 					if (isPrimary) {
-						out.write(`alter table ${table} add constraint ${indexName} primary key (${columns});\n`);
+						out.write(`alter table ${table} add constraint "${indexName}" primary key (${columns});\n`);
 					} else if (isUniqueConst) {
-						out.write(`alter table ${table} add constraint ${indexName} unique (${columns});\n`);
+						out.write(`alter table ${table} add constraint "${indexName}" unique (${columns});\n`);
 					} else if (isUnique) {
-						out.write(`create unique index ${indexName} on ${table} (${columns});\n`);
+						out.write(`create unique index "${indexName}" on "${table}" (${columns});\n`);
 					} else {
-						out.write(`create index ${indexName} on ${table} (${columns});\n`);
+						out.write(`create index "${indexName}" on "${table}" (${columns});\n`);
 					}
 				};
 
@@ -302,12 +315,12 @@ order by t.name asc, t.object_id asc, i.index_id asc, ic.index_column_id asc`
 						columns += ", ";
 					}
 
-					columns += row.column_name;
+					columns += `"${row.column_name}"`;
 				}
 
 				f();
 
-				out.write("\n");
+                out.write("GO\n\n");
 			}
 		});
 }
@@ -326,7 +339,7 @@ where
 t.object_id = c.object_id and c.user_type_id = ty.user_type_id and t.object_id = d.parent_object_id and c.column_id = d.parent_column_id
 order by t.name asc, t.object_id asc, c.column_id asc`
 		.then((result) => {
-            const rows = result.recordset;
+			const rows = result.recordset;
 
 			if (rows.length) {
 				let table;
@@ -336,53 +349,84 @@ order by t.name asc, t.object_id asc, c.column_id asc`
 					}
 
 					table = row.table_name;
-					let definition = row.definition;
 
-					definition = definition.replace(/^\(\((\d+)\)\)$/, "$1");
-					definition = definition.replace("(getdate())", "now()");
+                    let definition = row.definition;
 
-					if (row.type === "bit") {
-						if (definition === "1") {
-							definition = "true";
-						} else if (definition === "0") {
-							definition = "false";
-						}
-					}
+                    definition = definition.replace(/^\(\((\d+)\)\)$/, "$1");
 
-					out.write(`alter table ${table} alter column ${row.column_name} set default ${definition};\n`);
+                    out.write(`alter table "${table}" add constraint "${row.default_name}" default ${definition} for "${row.column_name}";\n`);
 				}
 
-				out.write("\n");
+				out.write("GO\n\n");
 			}
 		});
+}
+
+function writeCompiledObject(type) {
+    return sql.query`select c.text, c.colid from sysobjects o, syscomments c where c.id = o.id and o.type = ${type} order by o.name, c.colid asc`
+        .then((result) => {
+            const rows = result.recordset;
+
+            if (rows.length) {
+            	let n = 0;
+
+                for (let row of rows) {
+                	if (row.colid === 1) {
+                		if (n > 0) {
+                            out.write(";\nGO\n\n");
+						}
+
+                        ++n;
+					}
+
+                    out.write(row.text.trim());
+                }
+
+                out.write(";\nGO\n\n");
+            }
+        });
+}
+
+/**
+ * Write functions defs.
+ */
+function writeFunctions() {
+    out.write("/* --------------------- FUNCTIONS --------------------- */\n\n");
+
+    return writeCompiledObject("FN");
+}
+
+/**
+ * Write procedures defs.
+ */
+function writeProcedures() {
+    out.write("/* --------------------- PROCEDURES --------------------- */\n\n");
+
+    return writeCompiledObject("P");
 }
 
 /**
  * Write view defs.
  */
 function writeViews() {
-	out.write("/* --------------------- VIEWS --------------------- */\n\n");
+    out.write("/* --------------------- VIEWS --------------------- */\n\n");
 
-	return sql.query`select c.text from sysobjects o, syscomments c where c.id = o.id and o.type = 'V' order by o.name asc`
-		.then((result) => {
-			const rows = result.recordset;
+    return writeCompiledObject("V");
+}
 
-			if (rows.length) {
-				for (let row of rows) {
-					out.write(row.text.trim());
-					out.write(";\n");
-				}
+/**
+ * Write trigger defs.
+ */
+function writeTriggers() {
+    out.write("/* --------------------- TRIGGERS --------------------- */\n\n");
 
-				out.write("\n");
-			}
-		});
+    return writeCompiledObject("TR");
 }
 
 const minimist = require('minimist');
 
 const options = minimist(process.argv.slice(2), {
-	boolean: ["forceCaseInsensitive"], 
-	default: { "dataBatchSize": 100, "forceCaseInsensitive": true } });
+	default: { "dataBatchSize": 100 } });
 const args = options._;
 delete options._;
 
@@ -402,8 +446,8 @@ if (args.length === 1) {
 
 	out = fs.createWriteStream(args[1]);
 
-    // UTF-8 DOM for Windows
-	out.write("\ufeff");
+	// UTF-8 DOM for Windows
+    out.write("\ufeff");
 }
 
 const ConnectionString = require('mssql/lib/connectionstring');
@@ -415,28 +459,31 @@ if (typeof config.requestTimeout === "undefined") {
 }
 
 if (typeof config.connectionTimeout === "undefined") {
-    config.connectionTimeout = 60 * 60 * 1000;
+	config.connectionTimeout = 60 * 60 * 1000;
 }
 
 const sql = require('mssql');
 
-sql.connect(url)
+sql.connect(config)
 	.then(writeTables)
-	.then(writeSeqReset)
 	.then(writeIndexes)
 	.then(writeForeignKeyes)
+    .then(writeFunctions)
 	.then(writeDefaults)
+    .then(writeProcedures)
 	.then(writeViews)
-	.then(function() {
+    .then(writeTriggers)
+	.then(() => {
 		if (out !== process.stdout) {
-			out.end(function(err) {
+			out.end((err) => {
 				process.exit(0);
 			});
 		}  else {
 			process.exit(0);
 		}
 	})
-	.catch(function(e) {
-     console.error(e);
-     process.exit(1);
+	.catch((e) => {
+     	console.error(e);
+        console.trace();
+     	process.exit(1);
 });
