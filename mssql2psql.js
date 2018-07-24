@@ -357,25 +357,70 @@ order by t.name asc, t.object_id asc, c.column_id asc`
 		});
 }
 
+
+function writeCompiledObject(type) {
+    return sql.query`select c.text, c.colid from sysobjects o, syscomments c where c.id = o.id and o.type = ${type} order by o.name, c.colid asc`
+        .then((result) => {
+            const rows = result.recordset;
+
+            if (rows.length) {
+                let n = 0;
+
+                for (let row of rows) {
+                    if (row.colid === 1) {
+                        if (n > 0) {
+                            out.write(";\nGO\n\n");
+                        }
+
+                        ++n;
+                    }
+
+                    out.write(row.text.trim());
+                }
+
+                out.write(";\nGO\n\n");
+            }
+        });
+}
+
+/**
+ * Write functions defs.
+ */
+function writeFunctions() {
+    out.write("/* --------------------- FUNCTIONS --------------------- */\n\n");
+    out.write("/* -- These functions contain T-SQL and MUST be rewritten for PGSQL -- */\n\n");
+
+    return writeCompiledObject("FN");
+}
+
+/**
+ * Write procedures defs.
+ */
+function writeProcedures() {
+    out.write("/* --------------------- PROCEDURES --------------------- */\n\n");
+    out.write("/* -- These procedures contain T-SQL and MUST be rewritten for PGSQL -- */\n\n");
+
+    return writeCompiledObject("P");
+}
+
 /**
  * Write view defs.
  */
 function writeViews() {
-	out.write("/* --------------------- VIEWS --------------------- */\n\n");
+    out.write("/* --------------------- VIEWS --------------------- */\n\n");
+    out.write("/* -- These views may contain T-SQL and may need to be rewritten for PGSQL -- */\n\n");
 
-	return sql.query`select c.text from sysobjects o, syscomments c where c.id = o.id and o.type = 'V' order by o.name asc`
-		.then((result) => {
-			const rows = result.recordset;
+    return writeCompiledObject("V");
+}
 
-			if (rows.length) {
-				for (let row of rows) {
-					out.write(row.text.trim());
-					out.write(";\n");
-				}
+/**
+ * Write trigger defs.
+ */
+function writeTriggers() {
+    out.write("/* --------------------- TRIGGERS --------------------- */\n\n");
+    out.write("/* -- These triggers contain T-SQL and MUST be rewritten for PGSQL -- */\n\n");
 
-				out.write("\n");
-			}
-		});
+    return writeCompiledObject("TR");
 }
 
 const minimist = require('minimist');
@@ -425,8 +470,11 @@ sql.connect(url)
 	.then(writeSeqReset)
 	.then(writeIndexes)
 	.then(writeForeignKeyes)
+    .then(writeFunctions)
 	.then(writeDefaults)
-	.then(writeViews)
+    .then(writeProcedures)
+    .then(writeViews)
+    .then(writeTriggers)
 	.then(function() {
 		if (out !== process.stdout) {
 			out.end(function(err) {
