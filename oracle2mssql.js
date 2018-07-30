@@ -1,11 +1,5 @@
 "use strict";
 
-let values = require('object.values');
-
-if (!Object.values) {
-    values.shim();
-}
-
 function writeDropReferencedForeignKeyDDL(table) {
     if (table.referencedForeignKeys.length === 0)
         return;
@@ -343,12 +337,13 @@ order by c.TABLE_NAME asc, c.COLUMN_ID asc`, {}, { outFormat: oracledb.OBJECT, m
         let tables = {};
 
         if (result.rows.length) {
-            let tableData;
-
             const addTable = (tableData) => {
-                if (options.ignoreTable.indexOf(tableData.name) === -1)
+                if ((options.include === null || options.include.indexOf(tableData.name) !== -1) &&
+                    (options.exclude === null || options.exclude.indexOf(tableData.name) === -1))
                     tables[tableData.name] = tableData;
             };
+
+            let tableData;
 
             for (let row of result.rows) {
                 if (row.column_id === 1) {
@@ -462,52 +457,19 @@ function getTables() {
 function writeTables(tables) {
     let p = Promise.resolve();
 
-    if (options.createTable === true) {
-        // creating all tables + inserting data
-        for (let table of Object.values(tables)) {
-            p = p.then(() => { return writeTableDDL(table) });
-        }
+    // creating all tables + inserting data
+    const tableDatas = Object.values(tables);
 
-        for (let table of Object.values(tables)) {
-            p = p.then(() => { return writeTableData(table, false /* don't truncate data */) });
-        }
+    for (let table of tableDatas) {
+        p = p.then(() => writeTableDDL(table));
+    }
 
-        for (let table of Object.values(tables)) {
-            p = p.then(() => { return writeForeignKeyDDL(table) });
-        }
-    } else {
-        // optionally creating some tables + inserting data
-        if (Array.isArray(options.createTable)) {
-            let createTables = options.createTable.map((tableName) => { return tables[tableName]; });
+    for (let table of tableDatas) {
+        p = p.then(() => writeTableData(table, false /* don't truncate data */));
+    }
 
-            for (let table of createTables) {
-                p = p.then(() => { return writeDropReferencedForeignKeyDDL(table) });
-            }
-
-            for (let table of createTables) {
-                p = p.then(() => { return writeTableDDL(table) });
-            }
-        }
-
-        for (let table of Object.values(tables)) {
-            p = p.then(() => { return writeTableDisableConstraints(table) });
-        }
-
-        for (let table of Object.values(tables)) {
-            p = p.then(() => { return writeTableData(table, true /* truncate data */) });
-        }
-
-        if (Array.isArray(options.createTable)) {
-            let createTables = options.createTable.map((tableName) => { return tables[tableName]; });
-
-            for (let table of createTables) {
-                p = p.then(() => { return writeForeignKeyDDL(table) });
-            }
-        }
-
-        for (let table of Object.values(tables)) {
-            p = p.then(() => { return writeTableEnableConstraints(table) });
-        }
+    for (let table of tableDatas) {
+        p = p.then(() => writeForeignKeyDDL(table));
     }
 
     return p;
@@ -518,19 +480,19 @@ const minimist = require('minimist');
 
 const options = minimist(process.argv.slice(2), {
     boolean: ["forceCaseInsensitive"],
-    default: { "dataBatchSize": 100, "forceCaseInsensitive": true, "createTable": false, "ignoreTable": [] } });
+    default: { "dataBatchSize": 100, "forceCaseInsensitive": true, "include": null, "exclude": null } });
 const args = options._;
 delete options._;
 
-if (typeof options.createTable === "string")
-    options.createTable = [options.createTable.toUpperCase()];
-else if (Array.isArray(options.createTable))
-    options.createTable = options.createTable.filter(function(e) { return typeof e === "string"; }).map(function(e) { return e.toUpperCase(); });
+if (typeof options.include === "string")
+    options.include = [options.include.toUpperCase()];
+else if (Array.isArray(options.include))
+    options.include = options.include.filter((e) => typeof e === "string").map((e) => e.toUpperCase());
 
-if (typeof options.ignoreTable === "string")
-    options.ignoreTable = [options.ignoreTable.toUpperCase()];
-else if (Array.isArray(options.ignoreTable))
-    options.ignoreTable = options.ignoreTable.filter(function(e) { return typeof e === "string"; }).map(function(e) { return e.toUpperCase(); });
+if (typeof options.exclude === "string")
+    options.exclude = [options.exclude.toUpperCase()];
+else if (Array.isArray(options.exclude))
+    options.exclude = options.exclude.filter((e) => typeof e === "string").map((e) => e.toUpperCase());
 
 if (args.length === 0) {
     console.error("Missing the connection URL.");

@@ -15,5 +15,7 @@ node mssql2mssql.js mssql://user:pwd@host:port/database out.sql
 ```
 
 ```
-node oracle2mssql.js oracle://user:pwd@host:port/database out.sql
+export LD_LIBRARY_PATH=/opt/oracle/instantclient_12_1:$LD_LIBRARY_PATH
+
+node oracle2mssql.js oracle://user:pwd@host:port/service out.sql
 ```
