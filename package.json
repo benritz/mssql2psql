@@ -17,7 +17,9 @@
   "dependencies": {
     "minimist": "^1.2.0",
     "mssql": "^4.1.0",
-    "oracledb": "^2.3.0"
+    "oracledb": "^2.3.0",
+    "pg-promise": "^8.7.2",
+    "pg-query-stream": "^2.0.0"
   },
   "devDependencies": {},
   "preferGlobal": false,
