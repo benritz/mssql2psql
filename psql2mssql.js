@@ -1,6 +1,6 @@
 "use strict";
 
-function writeTable(table, columns) {
+function writeTable(schema, table, columns) {
 	// get columns def
 	let columnDefs = "";
 
@@ -51,7 +51,7 @@ function writeTable(table, columns) {
 
 	out.write(`/* -- ${table} -- */\nif object_id('${table}') is not null\nbegin\n\tdrop table ${table};\nend;\n\n\ncreate table ${table}\n(\n${columnDefs}\n);\nGO\n\n`);
 
-	const qs = new QueryStream(`select * from "${table}"`);
+	const qs = new QueryStream(`select * from "${schema}"."${table}"`);
 
 	let n = 0;
 
@@ -96,33 +96,38 @@ function writeTable(table, columns) {
 }
 
 function writeTables() {
-	return db.any('select c.relname as table_name, a.attnum as column_id, a.attname as column_name, atttypid::regtype as column_type, a.attlen as max_length, case a.attnotnull when true then 0 else 1 end as is_nullable from pg_class c, pg_authid r, pg_attribute a where c.relkind = $1 and c.relowner = r.oid and r.rolname = $2 and a.attrelid = c.oid and a.attnum > 0 order by c.oid, a.attnum', ['r', 'app_crsbi3'])
+	let sql = 'select n.nspname as schema, c.relname as table_name, a.attnum as column_id, a.attname as column_name, atttypid::regtype as column_type, a.attlen as max_length, case a.attnotnull when true then 0 else 1 end as is_nullable from pg_class c, pg_namespace n, pg_attribute a where c.relkind = $1 and c.relnamespace = n.oid and n.nspname = $2 and a.attrelid = c.oid and a.attnum > 0 order by c.oid, a.attnum',
+		params = ['r', options.schema || 'public'];
+
+	return db.any(sql, params)
 		.then((rows) => {
 			// write table DDL and data
 			let tables = [];
 
 			if (rows.length) {
-				let table, columns;
+				let schema, table, columns;
 
 				for (let row of rows) {
 					if (row.column_id === 1) {
 						if (table) {
-							tables.push({ table: table, columns: columns });
+							tables.push({ schema: schema, table: table, columns: columns });
 						}
 
+						schema = row.schema;
 						table = row.table_name;
 						columns = [];
 					}
 
 					let column = row;
+					delete column.schema;
 					delete column.table_name;
 					columns.push(column);
 				}
 
-				tables.push({ table: table, columns: columns });
+				tables.push({ schema: schema, table: table, columns: columns });
 			}
 
-			return tables.reduce((p, tableDef) => p.then(() => writeTable(tableDef.table, tableDef.columns) ), Promise.resolve());
+			return tables.reduce((p, tableDef) => p.then(() => writeTable(tableDef.schema, tableDef.table, tableDef.columns) ), Promise.resolve());
 		});
 }
 
