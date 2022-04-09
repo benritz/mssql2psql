@@ -15,7 +15,7 @@
     "postgres"
   ],
   "dependencies": {
-    "minimist": "^1.2.3",
+    "minimist": "^1.2.6",
     "mssql": "^4.1.0",
     "oracledb": "^2.3.0",
     "pg-promise": "^8.7.2",
